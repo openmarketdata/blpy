@@ -1,5 +1,7 @@
 from .blpapi_import_helper import blpapi
-from .util.ConnectionAndAuthOptions import createSessionOptions
+from .util.ConnectionAndAuthOptionsExt import (
+    setSessionOptions,
+    setAuthOptions)
 from argparse import Namespace
 from collections import namedtuple
 import multiprocessing
@@ -15,25 +17,26 @@ class Connection():
     """Connection options generated from kwargs, one session per connection"""
     def __init__(self, **kwargs: any) -> None:
         self.logger=kwargs.pop('logger',logging.getLogger(__name__))
-        # default to localhost DAPI
+        # default to 127.0.0.1:8194
         defaults={'hosts':[namedtuple('HostPort', ['host', 'port'])
                                                   ('127.0.0.1',8194)],
                   'services':['//blp/refdata','//blp/mktdata'],
+                  'queue_size': 7500,
+                  'auto_restart':True,
+                  # remote and tls options
+                  'remote':0,
                   'tls_client_credentials':None,
                   'tls_client_credentials_password':None,
                   'tls_trust_material':None,
-                  'read_certificate_files':None,
-                  'remote':0,
-                  'queue_size': 7500}
+                  'read_certificate_files':None}
         defaults.update(kwargs)
         self.options=Namespace(**defaults)
         self.sessions=Namespace(**{'event_queue':blpapi.EventQueue()})
         # require auth options set when create Conneciton object
-        self.set_auth_options(**kwargs)
-        # TODO: TLS Options
-        # TODO: ZFP Options
-        # manually set session options or package into simplified request/subscribe calls
-        sessionOptions = createSessionOptions(self.options)
+        setAuthOptions(self.options,**kwargs)
+        # TODO: TLS, ZFP Options
+        # set session options or package into simplified request/subscribe calls
+        sessionOptions = setSessionOptions(self.options)
         # create and start session
         session = blpapi.Session(sessionOptions)
         sessionOptions.destroy()
@@ -42,50 +45,16 @@ class Connection():
         # wait and process session status events
         while True:
             event = session.nextEvent(500)
-            self.logger.info(event)
+            self.logger.debug(event)
             if event.eventType() == blpapi.Event.SESSION_STATUS:
                 if event.messageType() == blpapi.Name("SessionTerminated"):
                     break
-            self.logger.debug(event)
         self.sessions.session=session
 
     def help(self):
         """Return options help"""
         pass
     
-    def set_auth_options(self,auth_type='none',**kwargs):
-        if auth_type in ['user','appuser']:
-            auth_user = blpapi.AuthUser.createWithLogonName()
-        if auth_type in ['app','appuser','manual']:
-            if 'app_name' not in kwargs:
-                raise KeyError('Missing app_name')
-            app_name = kwargs.get('app_name')
-        if auth_type == "dir":
-            if 'dir_property' not in kwargs:
-                raise KeyError('Missing dir_property')
-            dir_property = kwargs.get('dir_property')
-            auth_user = blpapi.AuthUser.createWithActiveDirectoryProperty(
-                dir_property)
-        if auth_type == 'manual':
-            if 'ip' not in kwargs:
-                raise KeyError('Missing ip')
-            if 'user_id' not in kwargs:
-                raise KeyError('Missing user_id')
-            ip = kwargs.get('ip')
-            user_id = kwargs.get('user_id')
-            auth_user = blpapi.AuthUser.createWithManualOptions(user_id, ip)
-        if auth_type == 'none':
-            auth_options = None
-        elif auth_type in ['user','dir']:
-            auth_options = blpapi.AuthOptions.createWithUser(auth_user)
-        elif auth_type == 'app':
-            auth_options = blpapi.AuthOptions.createWithApp(app_name)
-        elif auth_type == 'userapp':
-            auth_options = blpapi.AuthOptions.createWithUserAndApp(auth_user,
-                app_name)
-        else:
-            raise ValueError(f'Invalid auth_type:{auth_type}')
-        setattr(self.options,'sessionIdentityAuthOptions',auth_options)
 
 
 # class Connection:
