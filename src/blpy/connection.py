@@ -10,7 +10,8 @@ import logging
 logging.basicConfig(
     level=logging.DEBUG,
     format='[%(asctime)s] %(levelname)-8s %(name)-12s %(message)s',
-)logger = logging.getLogger(__name__)
+)
+logger = logging.getLogger(__name__)
 """
 
 class Connection():
@@ -31,30 +32,94 @@ class Connection():
                   'read_certificate_files':None}
         defaults.update(kwargs)
         self.options=Namespace(**defaults)
-        self.sessions=Namespace(**{'event_queue':blpapi.EventQueue()})
+        components={'event_queue':blpapi.EventQueue(),
+                    'services':{},
+                    'session':None}
+        self.meta=Namespace(**components)
         # require auth options set when create Conneciton object
         setAuthOptions(self.options,**kwargs)
         # TODO: TLS, ZFP Options
-        # set session options or package into simplified request/subscribe calls
+        # set session options 
         sessionOptions = setSessionOptions(self.options)
         # create and start session
         session = blpapi.Session(sessionOptions)
         sessionOptions.destroy()
         if not session.start():
             raise RuntimeError('Failed to start session')
+        self.meta.session=session
         # wait and process session status events
-        while True:
-            event = session.nextEvent(500)
-            self.logger.debug(event)
-            if event.eventType() == blpapi.Event.SESSION_STATUS:
-                if event.messageType() == blpapi.Name("SessionTerminated"):
-                    break
-        self.sessions.session=session
+        self.retrieve_events('SESSION',end_event=[blpapi.Event.TIMEOUT])
+        # open services
+        self._open_services()
+        # wait and process service status events
+        self.retrieve_events('SESSION',end_event=[blpapi.Event.TIMEOUT])
+
+    def _open_services(self):
+        for service in self.options.services:
+            if not self.meta.session.openService(service):
+                raise RuntimeError('Failed to open service:'+service)
+            self.logger.info('Opened service:'+service)
+            self.meta.services[service]=self.meta.session.getService(service)
+            self.logger.debug('Service:'+service+' has operations:')
+            for operation in self.meta.services[service].operations():
+                self.logger.debug(operation.name())
+                self.logger.debug(operation.description())
+                self.logger.debug(operation.requestDefinition())
+                self.logger.debug(operation.numResponseDefinitions())
+                self.logger.debug(operation.numEventDefinitions())
+                self.logger.debug(operation.numEventTemplates())
+                self.logger.debug(operation.numServiceExceptions())
+                self.logger.debug(operation.numServiceStatuses())
 
     def help(self):
         """Return options help"""
         pass
     
+    def retrieve_events(self,container,timeout=500,end_event=[blpapi.Event.TIMEOUT]):
+        DONE=False
+        events=[]
+        while (not DONE):
+            match container:
+                case 'SESSION':
+                    event=self.meta.session.nextEvent(timeout)
+                case 'EVENT_QUEUE':
+                    event=self.meta.event_queue.nextEvent(timeout)
+                case _:
+                    raise ValueError('Invalid container:'+container)
+            event_type=event.eventType()
+            events.append(self.process_event(event,self.meta.session))
+            if event_type in end_event:
+                DONE=True
+        return events
+
+    def process_event(self,event,session):
+        event_type=event.eventType()
+        if event_type in [blpapi.Event.UNKNOWN,blpapi.Event.TIMEOUT]:
+            self.logger.debug('Receiving event_type:'+str(event_type))
+        messages=[]
+        for message in event:
+            message_type=message.messageType()
+            if message_type in [blpapi.Names.SLOW_CONSUMER_WARNING,
+                                blpapi.Names.SLOW_CONSUMER_WARNING_CLEARED]:
+                self.logger.warn('Receiving message_type:'+str(message_type))
+            else:
+                self.logger.debug('Receiving message_type:'+str(message_type))
+            # read doc in message.py for correlationsIds to support multi
+            messages.append(message)
+            match event_type:
+                case blpapi.Event.SESSION_STATUS:
+                    if message_type == blpapi.Names.SESSION_TERMINATED \
+                    or message_type == blpapi.Names.SESSION_STARTUP_FAILURE:
+                        self.logger.error(message_type)
+                        session.stop()
+                    return messages
+                case blpapi.Event.SERVICE_STATUS:
+                    if message_type == blpapi.Names.SERVICE_OPEN_FAILURE:
+                        service_name=message.getElementAsString('serviceName')
+                        self.logger.error('Fail to open:'+service_name)
+                    return messages
+        return messages
+
 
 
 # class Connection:

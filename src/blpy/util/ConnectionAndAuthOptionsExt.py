@@ -58,7 +58,8 @@ def setAuthOptions(options,auth_type='none',**kwargs):
     setattr(options,'sessionIdentityAuthOptions',auth_options)
 
 def setSessionOptions(options):
+    """set session options"""
     sessionOptions=createSessionOptions(options)
     sessionOptions.setAutoRestartOnDisconnection(options.auto_restart)
-    sessionOptions.maxEventQueueSize(options.queue_size)
+    sessionOptions.setMaxEventQueueSize(options.queue_size)
     return sessionOptions
