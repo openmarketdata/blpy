@@ -61,6 +61,7 @@ class Connection():
             self.logger.info('Opened service:'+service)
             self.meta.services[service]=self.meta.session.getService(service)
             self.logger.debug('Service:'+service+' has operations:')
+            """
             for operation in self.meta.services[service].operations():
                 self.logger.debug(operation.name())
                 self.logger.debug(operation.description())
@@ -70,6 +71,28 @@ class Connection():
                 self.logger.debug(operation.numEventTemplates())
                 self.logger.debug(operation.numServiceExceptions())
                 self.logger.debug(operation.numServiceStatuses())
+                self.meta
+                self._gen_requests(operation)
+            """
+
+    def _get_operations(self,service):
+        operations=dict()
+        for operation in service.operations():
+            operation.name()
+
+    def _gen_requests():
+        pass
+
+    def _decode_schema_element(self,schema_element):
+        schema=dict()
+        for el in schema_element:
+            schema_type=el.typeDefinition()
+            schema_type_name=schema_type.name()
+            schema_element_name=el.name()
+            schema[schema_element_name]=schema_type_name
+        return schema
+    
+
 
     def help(self):
         """Return options help"""
@@ -87,12 +110,12 @@ class Connection():
                 case _:
                     raise ValueError('Invalid container:'+container)
             event_type=event.eventType()
-            events.append(self.process_event(event,self.meta.session))
+            events.append(self._process_event(event,self.meta.session))
             if event_type in end_event:
                 DONE=True
         return events
 
-    def process_event(self,event,session):
+    def _process_event(self,event,session):
         event_type=event.eventType()
         if event_type in [blpapi.Event.UNKNOWN,blpapi.Event.TIMEOUT]:
             self.logger.debug('Receiving event_type:'+str(event_type))
